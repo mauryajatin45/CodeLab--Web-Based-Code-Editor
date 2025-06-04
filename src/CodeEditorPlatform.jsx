@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Save, Share2, Sun, Moon, Copy, Check, Settings, Terminal, Clock, MemoryStick, Cloud, BarChart3 } from 'lucide-react';
+import axios from 'axios';
 
 // Define languages object outside the component
 const languages = {
@@ -47,48 +48,227 @@ const CodeEditorPlatform = () => {
   const [driveSaving, setDriveSaving] = useState(false);
   const editorRef = useRef(null);
 
-  // Complexity visualization data
-  const getComplexityData = (timeComplexity, spaceComplexity) => {
-    const complexityValues = {
-      'O(1)': { value: 1, color: '#10B981', label: 'Constant' },
-      'O(log n)': { value: 2, color: '#3B82F6', label: 'Logarithmic' },
-      'O(n)': { value: 3, color: '#F59E0B', label: 'Linear' },
-      'O(n log n)': { value: 4, color: '#EF4444', label: 'Linearithmic' },
-      'O(n^2)': { value: 5, color: '#8B5CF6', label: 'Quadratic' },
-      'O(2^n)': { value: 6, color: '#DC2626', label: 'Exponential' },
-      'O(n!)': { value: 7, color: '#991B1B', label: 'Factorial' }
-    };
+// ✅ Judge0 API Constants
+const JUDGE0_API_URL = 'https://judge0-ce.p.rapidapi.com';
+const JUDGE0_API_KEY = '9d5e851df8msh93b6b8c88948504p1e095djsnd531d8949a3d';
+const JUDGE0_API_HOST = 'judge0-ce.p.rapidapi.com';
 
-    const generateGrowthData = (complexity) => {
-      const data = [];
-      const points = [1, 2, 4, 8, 16, 32, 64];
-      
-      points.forEach(n => {
-        let value;
-        switch(complexity) {
-          case 'O(1)': value = 1; break;
-          case 'O(log n)': value = Math.log2(n); break;
-          case 'O(n)': value = n; break;
-          case 'O(n log n)': value = n * Math.log2(n); break;
-          case 'O(n^2)': value = n * n; break;
-          case 'O(2^n)': value = Math.pow(2, Math.min(n, 10)); break;
-          case 'O(n!)': value = n <= 5 ? factorial(n) : 1000; break;
-          default: value = n;
-        }
-        data.push({ n, value: Math.min(value, 1000) });
-      });
-      return data;
-    };
-
-    const factorial = (n) => n <= 1 ? 1 : n * factorial(n - 1);
-
-    return {
-      timeDetails: complexityValues[timeComplexity] || { value: 0, color: '#6B7280', label: 'Unknown' },
-      spaceDetails: complexityValues[spaceComplexity] || { value: 0, color: '#6B7280', label: 'Unknown' },
-      timeGrowth: generateGrowthData(timeComplexity),
-      spaceGrowth: generateGrowthData(spaceComplexity)
-    };
+const getComplexityData = (time, space) => {
+  const complexityValues = {
+    'O(1)': 1,
+    'O(log n)': 2,
+    'O(n)': 3,
+    'O(n log n)': 4,
+    'O(n^2)': 5,
+    'O(n^3)': 6,
+    'O(2^n)': 7,
+    'O(n!)': 8
   };
+
+  const complexityDescriptions = {
+    'O(1)': 'Constant time/space — best performance, independent of input size.',
+    'O(log n)': 'Logarithmic — good performance, input size increases exponentially.',
+    'O(n)': 'Linear — performance grows proportionally with input size.',
+    'O(n log n)': 'Linearithmic — common in efficient sorting algorithms.',
+    'O(n^2)': 'Quadratic — nested loops, inefficient for large input.',
+    'O(n^3)': 'Cubic — triple nested loops, very slow for large input.',
+    'O(2^n)': 'Exponential — increases rapidly, typically recursion-heavy.',
+    'O(n!)': 'Factorial — extremely inefficient, only for very small input sizes.'
+  };
+
+  const growthSamples = (value) => {
+    const nValues = [1, 5, 10, 15, 20];
+    switch (value) {
+      case 'O(1)': return nValues.map(() => 1);
+      case 'O(log n)': return nValues.map(n => Math.log2(n));
+      case 'O(n)': return nValues.map(n => n);
+      case 'O(n log n)': return nValues.map(n => n * Math.log2(n));
+      case 'O(n^2)': return nValues.map(n => n * n);
+      case 'O(n^3)': return nValues.map(n => n * n * n);
+      case 'O(2^n)': return nValues.map(n => Math.pow(2, n));
+      case 'O(n!)':
+        return nValues.map(n => {
+          let fact = 1;
+          for (let i = 2; i <= n; i++) fact *= i;
+          return fact;
+        });
+      default: return nValues.map(() => 0);
+    }
+  };
+
+  const timeValue = complexityValues[time] || 0;
+  const spaceValue = complexityValues[space] || 0;
+
+  return {
+    timeValue,
+    spaceValue,
+    timeDetails: {
+      label: time,
+      description: complexityDescriptions[time] || 'Unknown time complexity.',
+      value: timeValue
+    },
+    spaceDetails: {
+      label: space,
+      description: complexityDescriptions[space] || 'Unknown space complexity.',
+      value: spaceValue
+    },
+    timeGrowth: growthSamples(time),
+    spaceGrowth: growthSamples(space)
+  };
+};
+
+
+// ✅ Complexity Analyzer
+const analyzeComplexity = (code, language) => {
+  let timeComplexity = 'O(1)';
+  let spaceComplexity = 'O(1)';
+  const normalizedCode = code.toLowerCase().replace(/\s+/g, ' ');
+
+  const nestedLoopPattern = /for.*for|while.*while|for.*while|while.*for/g;
+  const singleLoopPattern = /for\s*\(|while\s*\(|for\s+\w+\s+in|for\s+\w+\s+of/g;
+  const recursivePattern = /(\w+)\s*\([^)]*\)[\s\S]*?\1\s*\(/g;
+
+  if (nestedLoopPattern.test(normalizedCode)) {
+    const forCount = (normalizedCode.match(/for/g) || []).length;
+    const whileCount = (normalizedCode.match(/while/g) || []).length;
+    const totalLoops = forCount + whileCount;
+
+    if (totalLoops >= 3) timeComplexity = 'O(n^3)';
+    else if (totalLoops >= 2) timeComplexity = 'O(n^2)';
+  } else if (singleLoopPattern.test(normalizedCode)) {
+    if (normalizedCode.includes('log') || normalizedCode.includes('/= 2') || normalizedCode.includes('* 2')) {
+      timeComplexity = 'O(n log n)';
+    } else {
+      timeComplexity = 'O(n)';
+    }
+  } else if (recursivePattern.test(normalizedCode)) {
+    if (normalizedCode.includes('fibonacci') || normalizedCode.includes('fib')) timeComplexity = 'O(2^n)';
+    else if (normalizedCode.includes('factorial')) timeComplexity = 'O(n!)';
+    else timeComplexity = 'O(log n)';
+  }
+
+  let hasVariableArray = false;
+  let has2DArray = false;
+  let hasRecursion = false;
+  let hasDynamicStructure = false;
+
+  const arrayPatterns = [
+    /new\s+\w+\[\s*\w+\s*\]/g,
+    /\w+\[\s*\]\s*=\s*new\s+\w+\[\s*\w+\s*\]/g,
+    /\w+\s*=\s*new\s+\w+\[\s*\w+\s*\]/g,
+    /list\s*=\s*\[\]/g,
+    /array\s*=\s*\[\]/g,
+    /\w+\s*=\s*\[\s*\]/g
+  ];
+  const matrix2DPatterns = [
+    /new\s+\w+\[\s*\w+\s*\]\s*\[\s*\w+\s*\]/g,
+    /\[\s*\[\s*\]\s*for/g,
+    /matrix|grid|board/g
+  ];
+  const recursiveSpacePatterns = [ /(\w+)\s*\([^)]*\)[\s\S]*?\1\s*\(/g ];
+  const dynamicStructurePatterns = [
+    /vector|arraylist|list|set|map|dictionary|hashtable|stack|queue/gi,
+    /append|push|add|insert|put/gi
+  ];
+
+  arrayPatterns.forEach(p => { if (p.test(normalizedCode)) hasVariableArray = true; });
+  matrix2DPatterns.forEach(p => { if (p.test(normalizedCode)) has2DArray = true; });
+  if (recursiveSpacePatterns.some(p => p.test(normalizedCode))) hasRecursion = true;
+  if (dynamicStructurePatterns.some(p => p.test(normalizedCode))) hasDynamicStructure = true;
+
+  if (has2DArray) spaceComplexity = 'O(n^2)';
+  else if (hasVariableArray || hasDynamicStructure) spaceComplexity = 'O(n)';
+  else if (hasRecursion) {
+    if (normalizedCode.includes('fibonacci') || normalizedCode.includes('fib')) spaceComplexity = 'O(n)';
+    else if (normalizedCode.includes('factorial')) spaceComplexity = 'O(n)';
+    else spaceComplexity = 'O(log n)';
+  } else spaceComplexity = 'O(1)';
+
+  return { timeComplexity, spaceComplexity };
+};
+
+// ✅ Main executeCode function
+const executeCode = useCallback(async () => {
+  setIsRunning(true);
+  setOutput('Running code...');
+
+  try {
+    const languageIds = {
+      python: 71,
+      javascript: 63,
+      java: 62,
+      cpp: 54
+    };
+
+    const postResponse = await axios.post(
+      `${JUDGE0_API_URL}/submissions?base64_encoded=false&wait=false`,
+      {
+        source_code: code,
+        language_id: languageIds[language] || 62,
+        stdin: ''
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-RapidAPI-Key': JUDGE0_API_KEY,
+          'X-RapidAPI-Host': JUDGE0_API_HOST
+        }
+      }
+    );
+
+    const token = postResponse.data.token;
+
+    let result;
+    for (let i = 0; i < 10; i++) {
+      await new Promise(res => setTimeout(res, 1500));
+      const resultResponse = await axios.get(
+        `${JUDGE0_API_URL}/submissions/${token}?base64_encoded=false`,
+        {
+          headers: {
+            'X-RapidAPI-Key': JUDGE0_API_KEY,
+            'X-RapidAPI-Host': JUDGE0_API_HOST
+          }
+        }
+      );
+
+      result = resultResponse.data;
+      if (result.status.id >= 3) break;
+    }
+
+    let executionOutput = '';
+    if (result.stdout) executionOutput = result.stdout.trim();
+    else if (result.compile_output) executionOutput = `Compilation Error:\n${result.compile_output}`;
+    else if (result.stderr) executionOutput = `Runtime Error:\n${result.stderr}`;
+    else executionOutput = 'Unknown error occurred.';
+
+    const { timeComplexity, spaceComplexity } = analyzeComplexity(code, language);
+
+    const complexityData = getComplexityData(timeComplexity, spaceComplexity); // Assumes this exists
+    setOutput(executionOutput);
+    setComplexity({
+      time: timeComplexity,
+      space: spaceComplexity,
+      timeValue: complexityData.timeDetails.value,
+      spaceValue: complexityData.spaceDetails.value,
+      ...complexityData
+    });
+  } catch (err) {
+    console.error('Judge0 Error:', err);
+    setOutput(`Error: ${err.message}`);
+    setComplexity({
+      time: '',
+      space: '',
+      timeValue: 0,
+      spaceValue: 0,
+      timeGrowth: [],
+      spaceGrowth: [],
+      timeDetails: null,
+      spaceDetails: null
+    });
+  }
+
+  setIsRunning(false);
+}, [code, language]);
 
   // Google Drive integration
   const initializeGoogleDrive = () => {
@@ -99,107 +279,50 @@ const CodeEditorPlatform = () => {
     }, 1000);
   };
 
-  const saveToGoogleDrive = async () => {
-    if (!googleDriveAuth) {
-      initializeGoogleDrive();
-      return;
-    }
-    
-    setDriveSaving(true);
-    
-    // Simulate Google Drive API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
+const saveToGoogleDrive = async () => {
+  if (!googleDriveAuth) {
+    initializeGoogleDrive();
+    return;
+  }
+  
+  setDriveSaving(true);
+  
+  try {
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1500));
     
     const fileName = driveFileName || `code_${language}_${Date.now()}`;
+    const fileType = language === 'python' ? 'py' : 
+                     language === 'javascript' ? 'js' : 
+                     language === 'java' ? 'java' : 
+                     language === 'cpp' ? 'cpp' : 'txt';
+    
+    // Create file content
     const fileContent = {
-      name: fileName,
-      language,
-      code,
-      timestamp: new Date().toISOString(),
-      complexity: complexity
+      name: `${fileName}.${fileType}`,
+      content: code,
+      metadata: {
+        language,
+        timestamp: new Date().toISOString(),
+        complexity: {
+          time: complexity.time,
+          space: complexity.space
+        }
+      }
     };
     
-    // Mock saving to Google Drive
     console.log('Saving to Google Drive:', fileContent);
     
+    alert(`Code saved to Google Drive as "${fileContent.name}"`);
+  } catch (error) {
+    console.error('Google Drive save failed:', error);
+    alert('Failed to save to Google Drive. Please try again.');
+  } finally {
     setDriveSaving(false);
     setShowDriveModal(false);
     setDriveFileName('');
-    alert(`Code saved to Google Drive as "${fileName}.${language}"`);
-  };
-
-  // Simulate code execution with JDoodle-like API
-  const executeCode = useCallback(async () => {
-    setIsRunning(true);
-    setOutput('Running code...');
-    
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    try {
-      // Mock execution results based on language
-      const mockResults = {
-        python: {
-          output: 'Hello, World!\nSuccess',
-          complexity: { 
-            time: 'O(1)', 
-            space: 'O(1)',
-            timeValue: 1,
-            spaceValue: 1
-          }
-        },
-        javascript: {
-          output: '120',
-          complexity: { 
-            time: 'O(n)', 
-            space: 'O(n)',
-            timeValue: 3,
-            spaceValue: 3
-          }
-        },
-        java: {
-          output: 'Hello, World!\n55',
-          complexity: { 
-            time: 'O(2^n)', 
-            space: 'O(n)',
-            timeValue: 6,
-            spaceValue: 3
-          }
-        },
-        cpp: {
-          output: 'Hello, World!\n55',
-          complexity: { 
-            time: 'O(2^n)', 
-            space: 'O(n)',
-            timeValue: 6,
-            spaceValue: 3
-          }
-        }
-      };
-
-      const result = mockResults[language] || { 
-        output: 'Code executed successfully', 
-        complexity: { time: 'O(1)', space: 'O(1)', timeValue: 1, spaceValue: 1 } 
-      };
-      
-      setOutput(result.output);
-      
-      // Enhanced complexity with graphical data
-      const complexityData = getComplexityData(result.complexity.time, result.complexity.space);
-      setComplexity({
-        time: result.complexity.time,
-        space: result.complexity.space,
-        timeValue: result.complexity.timeValue,
-        spaceValue: result.complexity.spaceValue,
-        ...complexityData
-      });
-    } catch (error) {
-      setOutput('Error: ' + error.message);
-      setComplexity({ time: '', space: '', timeValue: 0, spaceValue: 0, timeGrowth: [], spaceGrowth: [], timeDetails: null, spaceDetails: null });
-    }
-    
-    setIsRunning(false);
-  }, [language]);
+  }
+};
 
   const saveSnippet = useCallback(() => {
     const snippet = {
