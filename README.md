@@ -1,42 +1,49 @@
-# CodeLab - Web-based Multi-language Code Editor Platform
+# CodeLab
 
-## Overview
+CodeLab is a web-based code editor platform that supports multiple programming languages with features such as syntax highlighting, line numbering, auto-completion, code execution, complexity analysis, snippet saving, sharing, and Google Drive integration.
 
-CodeLab is a React + Vite web application that provides a multi-language code editor platform designed for developers and learners to write, run, save, and share code snippets in various programming languages. It offers an intuitive interface with enhanced features such as complexity analysis visualization and cloud integration.
+## Live Demo
+
+The application is live and accessible at: [https://codelab.mauryajatin.me](https://codelab.mauryajatin.me)
 
 ## Features
 
-- **Multi-language Support:** Write code in Python, JavaScript, Java, and C++ with sample starter code for each language.
-- **Code Editor:** A simple and responsive code editor with syntax highlighting (via textarea styling) and keyboard shortcuts.
-- **Run Code:** Simulate code execution with mock outputs and complexity analysis for time and space.
-- **Save Snippets:** Save your code snippets locally within the app for easy access and management.
-- **Share Code:** Generate shareable URLs encoding your code and language for easy sharing.
-- **Theme Toggle:** Switch between dark and light themes for comfortable coding.
-- **Google Drive Integration:** Connect your Google Drive account to save code files directly to the cloud.
-- **Complexity Analysis:** Visualize time and space complexity with bars and growth charts to understand algorithm efficiency.
+- **Multi-language support:** Python, JavaScript, Java, C++
+- **Code editor:** Powered by Monaco Editor with line numbering, syntax highlighting, and VS Code-like auto-completion
+- **Code execution:** Runs code using Judge0 API with output display
+- **Complexity analysis:** Time and space complexity analysis with detailed descriptions
+- **Snippet management:** Save, load, and share code snippets
+- **Google Drive integration:** Save code files directly to Google Drive
+- **Theme toggle:** Switch between dark and light themes
+- **Resizable output window:** Adjustable output panel height with drag slider
+- **Keyboard shortcuts:** Ctrl+Enter to run code, Ctrl+S to save snippet
 
-## Technologies Used
+## Project Structure
 
-- React
-- Vite
-- Tailwind CSS for styling
-- lucide-react for icons
+- `src/CodeEditorPlatform.jsx`: Main component managing state and layout
+- `src/components/`: Contains modular React components such as Header, Sidebar, CodeEditor, Output, etc.
+- `src/utils/complexity.js`: Utility functions for complexity analysis
+- `public/`: Static assets
+- `package.json`: Project dependencies and scripts
 
 ## Usage
 
-1. Select a programming language from the dropdown.
-2. Write or modify the code in the editor area.
-3. Run the code using the "Run" button or press Ctrl+Enter.
-4. View the output and complexity analysis in the output section.
-5. Save snippets locally using the save button or Ctrl+S.
-6. Share your code by generating a shareable URL.
-7. Toggle between dark and light themes using the theme button.
-8. Save your code to Google Drive by connecting your account and specifying a file name.
-
-## Development
-
-This project is bootstrapped with Vite and uses React for the frontend. Tailwind CSS is used for styling, and lucide-react provides the icon set.
+- Select a programming language from the dropdown.
+- Write or edit code in the editor.
+- Click **Run** or press **Ctrl+Enter** to execute the code.
+- View output and complexity analysis in the output panel.
+- Save snippets for later use or share them via generated URLs.
+- Save code files to Google Drive after connecting your account.
+- Resize the output panel by dragging the slider between editor and output.
 
 ## License
 
-This project is open source and available under the MIT License.
+This project is licensed under the MIT License.
+
+## Contact
+
+For any questions or feedback, please contact the maintainer.
+
+---
+
+Enjoy coding with CodeLab!

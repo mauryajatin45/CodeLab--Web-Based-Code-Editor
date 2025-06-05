@@ -1,3 +1,5 @@
+// File: src/CodeEditorPlatform.jsx
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import Header from './components/Header';
@@ -6,23 +8,87 @@ import CodeEditor from './components/CodeEditor';
 import Output from './components/Output';
 import { getComplexityData, analyzeComplexity } from './utils/complexity';
 
+/*
+  This component now calls Judge0 CE via RapidAPI. 
+  We assume two globals (set in public/index.html):
+  
+    window.__JUDGE0_RAPIDAPI_KEY__ = "<your-rapidapi-key>";
+    window.__JUDGE0_RAPIDAPI_HOST__ = "judge0-ce.p.rapidapi.com";
+    
+  Because Judge0 CE on RapidAPI requires:
+    • "X-RapidAPI-Key" header
+    • "X-RapidAPI-Host" header
+  and a valid POST endpoint.
+*/
+
 const languages = {
   python: {
     name: 'Python',
-    sample: '# Welcome to CodeLab!\n# Select a language and start coding\n\ndef hello_world():\n    print("Hello, World!")\n    return "Success"\n\nhello_world()'
+    sample: [
+      '# Welcome to CodeLab!',
+      '# Select a language and start coding',
+      '',
+      'def hello_world():',
+      '    print("Hello, World!")',
+      '    return "Success"',
+      '',
+      'hello_world()',
+    ].join('\n'),
   },
   javascript: {
     name: 'JavaScript',
-    sample: '// Welcome to CodeLab!\n// Select a language and start coding\n\nfunction factorial(n) {\n  if (n <= 1) return 1;\n  return n * factorial(n - 1);\n}\n\nconsole.log(factorial(5));'
+    sample: [
+      '// Welcome to CodeLab!',
+      '// Select a language and start coding',
+      '',
+      'function factorial(n) {',
+      '  if (n <= 1) return 1;',
+      '  return n * factorial(n - 1);',
+      '}',
+      '',
+      'console.log(factorial(5));',
+    ].join('\n'),
   },
   java: {
     name: 'Java',
-    sample: '// Welcome to CodeLab!\n// Select a language and start coding\n\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n        System.out.println(fibonacci(10));\n    }\n    \n    public static int fibonacci(int n) {\n        if (n <= 1) return n;\n        return fibonacci(n-1) + fibonacci(n-2);\n    }\n}'
+    sample: [
+      '// Welcome to CodeLab!',
+      '// Select a language and start coding',
+      '',
+      'public class Main {',
+      '    public static void main(String[] args) {',
+      '        System.out.println("Hello, World!");',
+      '        System.out.println(fibonacci(10));',
+      '    }',
+      '    ',
+      '    public static int fibonacci(int n) {',
+      '        if (n <= 1) return n;',
+      '        return fibonacci(n - 1) + fibonacci(n - 2);',
+      '    }',
+      '}',
+    ].join('\n'),
   },
   cpp: {
     name: 'C++',
-    sample: '// Welcome to CodeLab!\n// Select a language and start coding\n\n#include <iostream>\n\nint fibonacci(int n) {\n    if (n <= 1)\n        return n;\n    return fibonacci(n-1) + fibonacci(n-2);\n}\n\nint main() {\n    std::cout << "Hello, World!\\n";\n    std::cout << fibonacci(10) << "\\n";\n    return 0;\n}'
-  }
+    sample: [
+      '// Welcome to CodeLab!',
+      '// Select a language and start coding',
+      '',
+      '#include <iostream>',
+      '',
+      'int fibonacci(int n) {',
+      '    if (n <= 1)',
+      '        return n;',
+      '    return fibonacci(n - 1) + fibonacci(n - 2);',
+      '}',
+      '',
+      'int main() {',
+      '    std::cout << "Hello, World!\\n";',
+      '    std::cout << fibonacci(10) << "\\n";',
+      '    return 0;',
+      '}',
+    ].join('\n'),
+  },
 };
 
 const CodeEditorPlatform = () => {
@@ -39,7 +105,7 @@ const CodeEditorPlatform = () => {
     timeGrowth: [],
     spaceGrowth: [],
     timeDetails: null,
-    spaceDetails: null
+    spaceDetails: null,
   });
   const [savedSnippets, setSavedSnippets] = useState([]);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -55,10 +121,11 @@ const CodeEditorPlatform = () => {
 
   const clearOutput = () => setOutput('');
 
+  // Handle the vertical resize of the output pane
   const startResize = (e) => {
     resizeData.current = {
       startY: e.clientY,
-      startHeight: outputHeight
+      startHeight: outputHeight,
     };
     setIsResizing(true);
   };
@@ -67,7 +134,10 @@ const CodeEditorPlatform = () => {
     const handleMouseMove = (e) => {
       if (!isResizing) return;
       const delta = resizeData.current.startY - e.clientY;
-      const newHeight = Math.max(100, Math.min(window.innerHeight - 100, resizeData.current.startHeight + delta));
+      const newHeight = Math.max(
+        100,
+        Math.min(window.innerHeight - 100, resizeData.current.startHeight + delta)
+      );
       setOutputHeight(newHeight);
     };
 
@@ -84,7 +154,7 @@ const CodeEditorPlatform = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing]);
+  }, [isResizing, outputHeight]);
 
   const changeLanguage = (newLang) => {
     setLanguage(newLang);
@@ -98,7 +168,7 @@ const CodeEditorPlatform = () => {
       timeGrowth: [],
       spaceGrowth: [],
       timeDetails: null,
-      spaceDetails: null
+      spaceDetails: null,
     });
   };
 
@@ -108,9 +178,9 @@ const CodeEditorPlatform = () => {
       name: `Snippet ${savedSnippets.length + 1}`,
       language,
       code,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toLocaleString(),
     };
-    setSavedSnippets([...savedSnippets, snippet]);
+    setSavedSnippets((prev) => [...prev, snippet]);
   }, [code, language, savedSnippets]);
 
   const loadSnippet = (snippet) => {
@@ -125,8 +195,18 @@ const CodeEditorPlatform = () => {
       timeGrowth: [],
       spaceGrowth: [],
       timeDetails: null,
-      spaceDetails: null
+      spaceDetails: null,
     });
+  };
+
+  const getLanguageId = (lang) => {
+    const languageMap = {
+      python: 71,        // Python 3
+      javascript: 63,    // Node.js
+      java: 62,          // Java
+      cpp: 50,           // C++ (GCC 9.2.0)
+    };
+    return languageMap[lang] || 71;
   };
 
   const executeCode = async () => {
@@ -134,23 +214,63 @@ const CodeEditorPlatform = () => {
     setOutput('');
 
     try {
-      // Step 1: Analyze complexity
+      // 1) Complexity analysis (client‐side)
       const { timeComplexity, spaceComplexity } = analyzeComplexity(code, language);
       const complexityData = getComplexityData(timeComplexity, spaceComplexity);
       setComplexity({
         time: timeComplexity,
         space: spaceComplexity,
-        ...complexityData
+        ...complexityData,
       });
 
-      // Step 2: Simulated code output (replace with API call if needed)
-      setTimeout(() => {
-        setOutput('Code executed successfully.');
-        setIsRunning(false);
-      }, 800);
+      // 2) Read RapidAPI key + host from window globals
+      const RAPIDAPI_KEY = window.__JUDGE0_RAPIDAPI_KEY__;
+      const RAPIDAPI_HOST = window.__JUDGE0_RAPIDAPI_HOST__;
+      const JUDGE0_URL =
+        "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true";
 
+      if (!RAPIDAPI_KEY || !RAPIDAPI_HOST) {
+        throw new Error(
+          'RapidAPI key or host is missing. Make sure you set ' +
+          '`window.__JUDGE0_RAPIDAPI_KEY__` and `window.__JUDGE0_RAPIDAPI_HOST__` in index.html.'
+        );
+      }
+
+      // 3) POST to Judge0 CE on RapidAPI
+      const response = await axios.post(
+        JUDGE0_URL,
+        {
+          source_code: code,
+          language_id: getLanguageId(language),
+          stdin: '',
+          args: [],
+          expected_output: '',
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-RapidAPI-Key': RAPIDAPI_KEY,
+            'X-RapidAPI-Host': RAPIDAPI_HOST,
+          },
+        }
+      );
+
+      // 4) Process the result
+      const { stdout, stderr, status } = response.data;
+      if (status && status.id === 3) {
+        setOutput(`Compilation Error: ${stderr}`);
+      } else if (stdout) {
+        setOutput(stdout);
+      } else if (stderr) {
+        setOutput(`Error: ${stderr}`);
+      } else {
+        setOutput('No output returned.');
+      }
     } catch (err) {
+      // If Axios can’t reach the endpoint (wrong URL / no CORS / network down),
+      // it throws "Error: Network Error"
       setOutput(`Error: ${err.message}`);
+    } finally {
       setIsRunning(false);
     }
   };
@@ -168,7 +288,9 @@ const CodeEditorPlatform = () => {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [executeCode, saveSnippet]);
 
   return (
@@ -185,6 +307,7 @@ const CodeEditorPlatform = () => {
         onShare={() => {}}
         onShowDriveModal={() => setShowDriveModal(true)}
       />
+
       <div className="flex h-screen">
         <Sidebar
           theme={theme}
@@ -201,6 +324,8 @@ const CodeEditorPlatform = () => {
               onChange={(value) => setCode(value)}
             />
           </div>
+
+          {/* Draggable bar to resize the output pane */}
           <div
             className="w-full h-2 cursor-row-resize bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200 relative"
             onMouseDown={startResize}
@@ -209,6 +334,7 @@ const CodeEditorPlatform = () => {
               <div className="w-16 h-1 rounded-full bg-gray-400 dark:bg-gray-500"></div>
             </div>
           </div>
+
           <Output
             theme={theme}
             output={output}
