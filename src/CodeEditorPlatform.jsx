@@ -1,5 +1,4 @@
 // File: src/CodeEditorPlatform.jsx
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import Header from './components/Header';
@@ -7,19 +6,6 @@ import Sidebar from './components/Sidebar';
 import CodeEditor from './components/CodeEditor';
 import Output from './components/Output';
 import { getComplexityData, analyzeComplexity } from './utils/complexity';
-
-/*
-  This component now calls Judge0 CE via RapidAPI. 
-  We assume two globals (set in public/index.html):
-  
-    window.__JUDGE0_RAPIDAPI_KEY__ = "<your-rapidapi-key>";
-    window.__JUDGE0_RAPIDAPI_HOST__ = "judge0-ce.p.rapidapi.com";
-    
-  Because Judge0 CE on RapidAPI requires:
-    • "X-RapidAPI-Key" header
-    • "X-RapidAPI-Host" header
-  and a valid POST endpoint.
-*/
 
 const languages = {
   python: {
@@ -92,8 +78,17 @@ const languages = {
 };
 
 const CodeEditorPlatform = () => {
-  const [code, setCode] = useState(languages.python.sample);
-  const [language, setLanguage] = useState('python');
+  // Virtual file system state: folders and files (empty by default)
+  const [fileSystem, setFileSystem] = useState({
+    type: 'folder',
+    name: 'root',
+    children: [],
+  });
+
+  // Current open file path as array of folder/file names
+  const [currentFilePath, setCurrentFilePath] = useState([]);
+  const [code, setCode] = useState('// Welcome to CodeLab!\n// Open a folder or create a new file to start coding');
+  const [language, setLanguage] = useState('javascript');
   const [theme, setTheme] = useState('dark');
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
@@ -119,57 +114,218 @@ const CodeEditorPlatform = () => {
   const [isResizing, setIsResizing] = useState(false);
   const resizeData = useRef({ startY: 0, startHeight: 0 });
 
-  const clearOutput = () => setOutput('');
+  // Current file state to track if it's a local file or virtual file
+  const [currentFile, setCurrentFile] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Handle the vertical resize of the output pane
-  const startResize = (e) => {
-    resizeData.current = {
-      startY: e.clientY,
-      startHeight: outputHeight,
+  // Helper function to get language from file extension
+  const getLanguageFromExtension = (filename) => {
+    const extension = filename.split('.').pop()?.toLowerCase();
+    const extensionMap = {
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'ts': 'javascript',
+      'tsx': 'javascript',
+      'py': 'python',
+      'java': 'java',
+      'cpp': 'cpp',
+      'c': 'cpp',
+      'html': 'html',
+      'css': 'css',
+      'json': 'javascript',
+      'md': 'javascript'
     };
-    setIsResizing(true);
+    return extensionMap[extension] || 'javascript';
   };
 
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!isResizing) return;
-      const delta = resizeData.current.startY - e.clientY;
-      const newHeight = Math.max(
-        100,
-        Math.min(window.innerHeight - 100, resizeData.current.startHeight + delta)
-      );
-      setOutputHeight(newHeight);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    if (isResizing) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
+  // Handler for opening file from local folder (called from Sidebar)
+  const handleOpenFile = async (path, fileData = null) => {
+    // If fileData is provided, it's a local file
+    if (fileData && fileData.isLocal) {
+      setCurrentFilePath(path);
+      setCode(fileData.content);
+      setLanguage(fileData.language);
+      setCurrentFile(fileData);
+      setHasUnsavedChanges(false);
+      setOutput('');
+      setComplexity({
+        time: '',
+        space: '',
+        timeValue: 0,
+        spaceValue: 0,
+        timeGrowth: [],
+        spaceGrowth: [],
+        timeDetails: null,
+        spaceDetails: null,
+      });
+    } else {
+      // Virtual file system file
+      const node = findNodeByPath(path);
+      if (node && node.type === 'file') {
+        setCurrentFilePath(path);
+        setCode(node.content);
+        setLanguage(node.language);
+        setCurrentFile(null);
+        setHasUnsavedChanges(false);
+        setOutput('');
+        setComplexity({
+          time: '',
+          space: '',
+          timeValue: 0,
+          spaceValue: 0,
+          timeGrowth: [],
+          spaceGrowth: [],
+          timeDetails: null,
+          spaceDetails: null,
+        });
+      }
     }
+  };
 
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+  // Save current file (local or virtual)
+  const saveCurrentFile = async () => {
+    if (currentFile && currentFile.isLocal && currentFile.handle) {
+      try {
+        // Save to local file system using File System Access API
+        const writable = await currentFile.handle.createWritable();
+        await writable.write(code);
+        await writable.close();
+        setHasUnsavedChanges(false);
+        setOutput('File saved successfully!');
+      } catch (error) {
+        console.error('Error saving file:', error);
+        setOutput(`Error saving file: ${error.message}`);
+      }
+    } else if (currentFilePath.length > 0) {
+      // Save virtual file
+      updateFileContent(currentFilePath, code);
+      setHasUnsavedChanges(false);
+      setOutput('File saved to workspace!');
+    }
+  };
+
+  // Helper function to find a file or folder node by path
+  const findNodeByPath = (path, node = fileSystem) => {
+    if (path.length === 0) return node;
+    if (!node.children) return null;
+    const [head, ...tail] = path;
+    const child = node.children.find((c) => c.name === head);
+    if (!child) return null;
+    return findNodeByPath(tail, child);
+  };
+
+  // Update file content in fileSystem by path
+  const updateFileContent = (path, newContent) => {
+    const updateNode = (node, currentPath) => {
+      if (currentPath.length === 0) {
+        if (node.type === 'file') {
+          return { ...node, content: newContent };
+        }
+        return node;
+      }
+      if (!node.children) return node;
+      const [head, ...tail] = currentPath;
+      return {
+        ...node,
+        children: node.children.map((child) =>
+          child.name === head ? updateNode(child, tail) : child
+        ),
+      };
     };
-  }, [isResizing, outputHeight]);
+    setFileSystem((prev) => updateNode(prev, path));
+  };
 
-  const changeLanguage = (newLang) => {
-    setLanguage(newLang);
-    setCode(languages[newLang].sample);
-    setOutput('');
-    setComplexity({
-      time: '',
-      space: '',
-      timeValue: 0,
-      spaceValue: 0,
-      timeGrowth: [],
-      spaceGrowth: [],
-      timeDetails: null,
-      spaceDetails: null,
-    });
+  // Create new file or folder in a folder path
+  const createNode = (parentPath, newNode) => {
+    const addNode = (node, currentPath) => {
+      if (currentPath.length === 0) {
+        if (node.type === 'folder') {
+          return { ...node, children: [...(node.children || []), newNode] };
+        }
+        return node;
+      }
+      if (!node.children) return node;
+      const [head, ...tail] = currentPath;
+      return {
+        ...node,
+        children: node.children.map((child) =>
+          child.name === head ? addNode(child, tail) : child
+        ),
+      };
+    };
+    setFileSystem((prev) => addNode(prev, parentPath));
+  };
+
+  // Rename a file or folder by path
+  const renameNode = (path, newName) => {
+    const rename = (node, currentPath) => {
+      if (currentPath.length === 1) {
+        if (node.children) {
+          return {
+            ...node,
+            children: node.children.map((child) =>
+              child.name === currentPath[0] ? { ...child, name: newName } : child
+            ),
+          };
+        }
+        return node;
+      }
+      if (!node.children) return node;
+      const [head, ...tail] = currentPath;
+      return {
+        ...node,
+        children: node.children.map((child) =>
+          child.name === head ? rename(child, tail) : child
+        ),
+      };
+    };
+    setFileSystem((prev) => rename(prev, path));
+    // If renaming current open file, update currentFilePath
+    if (currentFilePath.length === path.length && currentFilePath.every((v, i) => v === path[i])) {
+      const newPath = [...path.slice(0, -1), newName];
+      setCurrentFilePath(newPath);
+    }
+  };
+
+  // Delete a file or folder by path
+  const deleteNode = (path) => {
+    const removeNode = (node, currentPath) => {
+      if (currentPath.length === 1) {
+        if (!node.children) return node;
+        return {
+          ...node,
+          children: node.children.filter((child) => child.name !== currentPath[0]),
+        };
+      }
+      if (!node.children) return node;
+      const [head, ...tail] = currentPath;
+      return {
+        ...node,
+        children: node.children.map((child) =>
+          child.name === head ? removeNode(child, tail) : child
+        ),
+      };
+    };
+    setFileSystem((prev) => removeNode(prev, path));
+    // If deleting current open file, clear editor
+    if (currentFilePath.length === path.length && currentFilePath.every((v, i) => v === path[i])) {
+      setCurrentFilePath([]);
+      setCode('// File deleted\n// Create a new file or open another file to start coding');
+      setLanguage('javascript');
+      setCurrentFile(null);
+      setHasUnsavedChanges(false);
+    }
+  };
+
+  // Update code state and track unsaved changes
+  const handleCodeChange = (newCode) => {
+    setCode(newCode);
+    setHasUnsavedChanges(true);
+    
+    // Auto-save for virtual files
+    if (currentFilePath.length > 0 && (!currentFile || !currentFile.isLocal)) {
+      updateFileContent(currentFilePath, newCode);
+    }
   };
 
   const saveSnippet = useCallback(() => {
@@ -183,9 +339,12 @@ const CodeEditorPlatform = () => {
     setSavedSnippets((prev) => [...prev, snippet]);
   }, [code, language, savedSnippets]);
 
-  const loadSnippet = (snippet) => {
-    setCode(snippet.code);
-    setLanguage(snippet.language);
+  const changeLanguage = (newLang) => {
+    setLanguage(newLang);
+    setCode(languages[newLang].sample);
+    setCurrentFilePath([]);
+    setCurrentFile(null);
+    setHasUnsavedChanges(false);
     setOutput('');
     setComplexity({
       time: '',
@@ -197,16 +356,6 @@ const CodeEditorPlatform = () => {
       timeDetails: null,
       spaceDetails: null,
     });
-  };
-
-  const getLanguageId = (lang) => {
-    const languageMap = {
-      python: 71,        // Python 3
-      javascript: 63,    // Node.js
-      java: 62,          // Java
-      cpp: 50,           // C++ (GCC 9.2.0)
-    };
-    return languageMap[lang] || 71;
   };
 
   const executeCode = async () => {
@@ -267,31 +416,97 @@ const CodeEditorPlatform = () => {
         setOutput('No output returned.');
       }
     } catch (err) {
-      // If Axios can’t reach the endpoint (wrong URL / no CORS / network down),
-      // it throws "Error: Network Error"
       setOutput(`Error: ${err.message}`);
     } finally {
       setIsRunning(false);
     }
   };
 
+  const loadSnippet = (snippet) => {
+    setCode(snippet.code);
+    setLanguage(snippet.language);
+    setCurrentFilePath([]);
+    setCurrentFile(null);
+    setHasUnsavedChanges(false);
+    setOutput('');
+    setComplexity({
+      time: '',
+      space: '',
+      timeValue: 0,
+      spaceValue: 0,
+      timeGrowth: [],
+      spaceGrowth: [],
+      timeDetails: null,
+      spaceDetails: null,
+    });
+  };
+
+  const startResize = (e) => {
+    resizeData.current = {
+      startY: e.clientY,
+      startHeight: outputHeight,
+    };
+    setIsResizing(true);
+  };
+
+  const clearOutput = () => setOutput('');
+
+  // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        executeCode();
-      }
+      // Ctrl+S or Cmd+S to save
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        saveSnippet();
+        saveCurrentFile();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [code, currentFile, currentFilePath]);
+
+  // Handle mouse move for resizing output panel
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizing) return;
+      const deltaY = e.clientY - resizeData.current.startY;
+      const newHeight = resizeData.current.startHeight - deltaY;
+      setOutputHeight(Math.max(100, Math.min(window.innerHeight - 200, newHeight)));
     };
-  }, [executeCode, saveSnippet]);
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
+  const getLanguageId = (lang) => {
+    const langIds = {
+      python: 71,
+      javascript: 63,
+      java: 62,
+      cpp: 54,
+    };
+    return langIds[lang] || 71;
+  };
+
+  // Get current file display name
+  const getCurrentFileName = () => {
+    if (currentFilePath.length > 0) {
+      const fileName = currentFilePath[currentFilePath.length - 1];
+      return hasUnsavedChanges ? `${fileName} •` : fileName;
+    }
+    return hasUnsavedChanges ? 'Untitled •' : 'Untitled';
+  };
 
   return (
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'} transition-colors duration-300`}>
@@ -303,25 +518,59 @@ const CodeEditorPlatform = () => {
         onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         onRun={executeCode}
         isRunning={isRunning}
-        onSave={saveSnippet}
+        onSave={saveCurrentFile}
         onShare={() => {}}
         onShowDriveModal={() => setShowDriveModal(true)}
+        currentFileName={getCurrentFileName()}
+        hasUnsavedChanges={hasUnsavedChanges}
       />
 
       <div className="flex h-screen">
         <Sidebar
           theme={theme}
+          fileSystem={fileSystem}
+          currentFilePath={currentFilePath}
+          onOpenFile={handleOpenFile}
+          onCreateNode={createNode}
+          onRenameNode={renameNode}
+          onDeleteNode={deleteNode}
           savedSnippets={savedSnippets}
           languages={languages}
           onLoadSnippet={loadSnippet}
         />
+        
         <div className="flex-1 flex flex-col">
+          {/* File tab bar */}
+          {currentFilePath.length > 0 && (
+            <div className={`flex items-center px-4 py-2 border-b ${
+              theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-gray-100 border-gray-200'
+            }`}>
+              <span className={`text-sm ${
+                theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+              }`}>
+                {getCurrentFileName()}
+              </span>
+              {hasUnsavedChanges && (
+                <button
+                  onClick={saveCurrentFile}
+                  className={`ml-2 px-2 py-1 text-xs rounded ${
+                    theme === 'dark' 
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                      : 'bg-blue-500 hover:bg-blue-600 text-white'
+                  }`}
+                >
+                  Save
+                </button>
+              )}
+            </div>
+          )}
+
           <div className={`flex-1 ${theme === 'dark' ? 'bg-gray-900' : 'bg-white'}`}>
             <CodeEditor
               code={code}
               language={language}
               theme={theme}
-              onChange={(value) => setCode(value)}
+              onChange={handleCodeChange}
             />
           </div>
 
